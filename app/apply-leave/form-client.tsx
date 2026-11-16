@@ -8,7 +8,7 @@ import {
   type LeaveApplicationInput,
   type LeaveApplicationFormValues,
 } from "@/lib/validations";
-import { calculateLeaveDays } from "@/lib/utils";
+import { calculateLeaveDays, formatDateLong } from "@/lib/utils";
 import {
   CheckCircle2,
   AlertCircle,
@@ -28,6 +28,10 @@ interface SubmissionResult {
   status: string;
   totalDays: number;
   submittedAt: string;
+  employeeName: string;
+  startDate: string;
+  endDate: string;
+  reason: string;
 }
 
 function FormField({
@@ -182,8 +186,12 @@ export function LeaveApplicationFormClient() {
           referenceNumber: json.referenceNumber,
           id: json.id,
           status: json.status,
-          totalDays: json.totalDays,
+          totalDays: json.totalDays ?? leaveDays,
           submittedAt: json.submittedAt ?? new Date().toISOString(),
+          employeeName: json.employeeName ?? data.employeeName,
+          startDate: json.startDate ?? data.startDate,
+          endDate: json.endDate ?? data.endDate,
+          reason: json.reason ?? data.reason,
         });
       } else {
         setServerError(
@@ -242,9 +250,27 @@ export function LeaveApplicationFormClient() {
             </div>
           </div>
           <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Employee Name</span>
+            <span className="text-sm font-medium text-gray-900">
+              {submitted.employeeName}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500 uppercase tracking-wide">Status</span>
             <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
               Pending Review
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">From</span>
+            <span className="text-sm font-medium text-gray-900">
+              {formatDateLong(submitted.startDate)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">To</span>
+            <span className="text-sm font-medium text-gray-900">
+              {formatDateLong(submitted.endDate)}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -253,6 +279,16 @@ export function LeaveApplicationFormClient() {
               {submitted.totalDays} day{submitted.totalDays !== 1 ? "s" : ""}
             </span>
           </div>
+          {submitted.reason && (
+            <div className="pt-2 border-t border-gray-200/70">
+              <span className="text-xs text-gray-500 uppercase tracking-wide block mb-1">
+                Reason
+              </span>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">
+                {submitted.reason}
+              </p>
+            </div>
+          )}
         </div>
 
         <p className="text-xs text-gray-500 mb-6">

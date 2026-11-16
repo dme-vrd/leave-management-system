@@ -47,7 +47,17 @@ export async function POST(request: NextRequest) {
   if (data.idempotencyKey) {
     const existing = await prisma.leaveApplication.findUnique({
       where: { idempotencyKey: data.idempotencyKey },
-      select: { id: true, referenceNumber: true, status: true },
+      select: {
+        id: true,
+        referenceNumber: true,
+        status: true,
+        totalDays: true,
+        submittedAt: true,
+        employeeName: true,
+        startDate: true,
+        endDate: true,
+        reason: true,
+      },
     });
     if (existing) {
       return Response.json(
@@ -56,6 +66,12 @@ export async function POST(request: NextRequest) {
           referenceNumber: existing.referenceNumber,
           id: existing.id,
           status: existing.status,
+          totalDays: existing.totalDays,
+          submittedAt: existing.submittedAt,
+          employeeName: existing.employeeName,
+          startDate: existing.startDate,
+          endDate: existing.endDate,
+          reason: existing.reason,
           duplicate: true,
         },
         { status: 200 }
@@ -237,6 +253,10 @@ export async function POST(request: NextRequest) {
       status: application.status,
       totalDays: application.totalDays,
       submittedAt: application.submittedAt,
+      employeeName: application.employeeName,
+      startDate: application.startDate,
+      endDate: application.endDate,
+      reason: application.reason,
     },
     { status: 201 }
   );
