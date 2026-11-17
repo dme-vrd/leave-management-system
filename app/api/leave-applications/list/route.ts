@@ -100,6 +100,7 @@ export async function GET(request: NextRequest) {
         endDate: true,
         totalDays: true,
         isHalfDay: true,
+        reason: true,
         status: true,
         reportingManagerName: true,
         handoverPersonName: true,

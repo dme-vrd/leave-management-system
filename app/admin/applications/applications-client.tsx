@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { StatusBadge } from "@/components/status-badge";
 import { formatDateIndia, formatDateTime } from "@/lib/utils";
+import {
+  exportApplicationsToExcel,
+  exportApplicationsToPDF,
+  type ExportApplicationItem,
+} from "@/lib/export-utils";
 import {
   Search,
   ChevronLeft,
@@ -16,6 +21,10 @@ import {
   AlertCircle,
   FileText,
   Loader2,
+  Download,
+  Printer,
+  FileSpreadsheet,
+  ChevronDown,
 } from "lucide-react";
 
 interface Application {
@@ -29,10 +38,12 @@ interface Application {
   startDate: string;
   endDate: string;
   totalDays: number;
+  isHalfDay?: boolean;
   status: "PENDING" | "APPROVED" | "DECLINED" | "CANCELLED";
   approvedByUsername?: string | null;
   reportingManagerName: string;
   handoverPersonName?: string | null;
+  reason?: string | null;
   submittedAt: string;
   approvalHistory: Array<{
     remarks?: string | null;
@@ -104,6 +115,23 @@ export function ApplicationsClient() {
     error: null,
   });
 
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState<"excel" | "pdf" | "print" | null>(null);
+  const [printData, setPrintData] = useState<Application[] | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    }
+    if (exportMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [exportMenuOpen]);
+
   useEffect(() => {
     Promise.all([
       fetch("/api/departments?includeInactive=false"),
@@ -141,6 +169,110 @@ export function ApplicationsClient() {
       setLoading(false);
     }
   }, [page, filters]);
+
+  const fetchAllFilteredApplications = useCallback(async (): Promise<ExportApplicationItem[]> => {
+    let sourceApps = applications;
+    if (pagination.total > applications.length) {
+      const params = new URLSearchParams({
+        page: "1",
+        pageSize: String(Math.max(pagination.total, 100)),
+        ...(filters.search && { search: filters.search }),
+        ...(filters.status && { status: filters.status }),
+        ...(filters.departmentId && { departmentId: filters.departmentId }),
+        ...(filters.leaveTypeId && { leaveTypeId: filters.leaveTypeId }),
+        sortBy: "submittedAt",
+        sortDir: "desc",
+      });
+      const res = await fetch(`/api/leave-applications/list?${params}`);
+      if (res.ok) {
+        const json = await res.json();
+        sourceApps = json.data ?? applications;
+      }
+    }
+    return sourceApps.map((app) => ({
+      ...app,
+      decisionBy: getDecisionBy(app),
+    }));
+  }, [applications, filters, pagination.total]);
+
+  async function handleExportExcel() {
+    setIsExporting("excel");
+    try {
+      const data = await fetchAllFilteredApplications();
+      if (!data.length) {
+        alert("No applications found to export.");
+        return;
+      }
+      exportApplicationsToExcel(data);
+    } catch (err) {
+      console.error("Export Excel error:", err);
+      alert("Failed to export Excel report. Please try again.");
+    } finally {
+      setIsExporting(null);
+    }
+  }
+
+  async function handleExportPDF() {
+    setIsExporting("pdf");
+    try {
+      const data = await fetchAllFilteredApplications();
+      if (!data.length) {
+        alert("No applications found to export.");
+        return;
+      }
+      const activeFilters = [
+        filters.status && `Status: ${filters.status}`,
+        filters.departmentId && `Dept: ${departments.find((d) => d.id === filters.departmentId)?.name || "Selected"}`,
+        filters.leaveTypeId && `Type: ${leaveTypes.find((lt) => lt.id === filters.leaveTypeId)?.name || "Selected"}`,
+        filters.search && `Search: "${filters.search}"`,
+      ].filter(Boolean) as string[];
+
+      exportApplicationsToPDF(data, {
+        activeFilters,
+        totalRecords: pagination.total,
+      });
+    } catch (err) {
+      console.error("Export PDF error:", err);
+      alert("Failed to export PDF report. Please try again.");
+    } finally {
+      setIsExporting(null);
+    }
+  }
+
+  async function handlePrint() {
+    setIsExporting("print");
+    try {
+      if (pagination.total > applications.length) {
+        const params = new URLSearchParams({
+          page: "1",
+          pageSize: String(Math.max(pagination.total, 100)),
+          ...(filters.search && { search: filters.search }),
+          ...(filters.status && { status: filters.status }),
+          ...(filters.departmentId && { departmentId: filters.departmentId }),
+          ...(filters.leaveTypeId && { leaveTypeId: filters.leaveTypeId }),
+          sortBy: "submittedAt",
+          sortDir: "desc",
+        });
+        const res = await fetch(`/api/leave-applications/list?${params}`);
+        if (res.ok) {
+          const json = await res.json();
+          setPrintData(json.data ?? applications);
+          setTimeout(() => {
+            window.print();
+            setPrintData(null);
+            setIsExporting(null);
+          }, 250);
+          return;
+        }
+      }
+      window.print();
+    } catch (err) {
+      console.error("Print error:", err);
+      window.print();
+    } finally {
+      setIsExporting(null);
+    }
+  }
 
   useEffect(() => {
     fetchApplications();
@@ -182,28 +314,121 @@ export function ApplicationsClient() {
     }
   }
 
+  const displayApplications = printData ?? applications;
+
   return (
     <div className="max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      {/* Print View Header (Visible ONLY on print) */}
+      <div className="hidden print:block mb-6 border-b-2 border-black pb-4">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-xl font-bold uppercase tracking-wider text-black">VRD Exports</h1>
+            <p className="text-xs text-gray-600 mt-0.5">Leave Applications Report</p>
+          </div>
+          <div className="text-right text-xs text-gray-600">
+            <p><span className="font-semibold">Generated:</span> {formatDateTime(new Date().toISOString())}</p>
+            <p><span className="font-semibold">Total Records:</span> {pagination.total}</p>
+            {(filters.status || filters.search || filters.departmentId || filters.leaveTypeId) && (
+              <p className="text-[11px] text-gray-500 mt-1">
+                Filtered by: {[
+                  filters.status && `Status: ${filters.status}`,
+                  filters.departmentId && `Dept: ${departments.find((d) => d.id === filters.departmentId)?.name || "Selected"}`,
+                  filters.leaveTypeId && `Type: ${leaveTypes.find((lt) => lt.id === filters.leaveTypeId)?.name || "Selected"}`,
+                  filters.search && `Search: "${filters.search}"`,
+                ].filter(Boolean).join(" | ")}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Screen Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 print:hidden">
         <div>
           <h1 className="text-xl font-semibold text-gray-900 tracking-tight">Applications</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {pagination.total} total application{pagination.total !== 1 ? "s" : ""}
           </p>
         </div>
-        <button
-          onClick={fetchApplications}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+
+        <div className="flex items-center gap-2">
+          {/* Print Button */}
+          <button
+            onClick={handlePrint}
+            disabled={loading || applications.length === 0 || isExporting !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-xs disabled:opacity-50"
+            title="Print applications report"
+          >
+            {isExporting === "print" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-500" />
+            ) : (
+              <Printer className="w-3.5 h-3.5 text-gray-500" />
+            )}
+            Print
+          </button>
+
+          {/* Export Dropdown */}
+          <div className="relative" ref={exportMenuRef}>
+            <button
+              onClick={() => setExportMenuOpen((prev) => !prev)}
+              disabled={loading || applications.length === 0 || isExporting !== null}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-xs disabled:opacity-50"
+              aria-expanded={exportMenuOpen}
+              aria-haspopup="true"
+            >
+              {isExporting === "excel" || isExporting === "pdf" ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-500" />
+              ) : (
+                <Download className="w-3.5 h-3.5 text-gray-500" />
+              )}
+              Export
+              <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform ${exportMenuOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {exportMenuOpen && (
+              <div className="absolute right-0 mt-1.5 w-52 bg-white border border-gray-200 rounded-xl shadow-lg py-1.5 z-30 animate-in fade-in-50 zoom-in-95">
+                <div className="px-3.5 py-1.5 border-b border-gray-100">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Export Report</p>
+                </div>
+                <button
+                  onClick={() => { setExportMenuOpen(false); handleExportExcel(); }}
+                  className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-3 transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900">Excel Spreadsheet</p>
+                    <p className="text-[11px] text-gray-400">Export report to .xlsx</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => { setExportMenuOpen(false); handleExportPDF(); }}
+                  className="w-full text-left px-3.5 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-gray-900 flex items-center gap-3 transition-colors"
+                >
+                  <FileText className="w-4 h-4 text-red-600 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-gray-900">PDF Document</p>
+                    <p className="text-[11px] text-gray-400">Formatted report (.pdf)</p>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Refresh Button */}
+          <button
+            onClick={fetchApplications}
+            disabled={loading || isExporting !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+            title="Refresh list"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-white border border-gray-200 rounded-xl p-3.5 mb-5 flex flex-wrap gap-2.5">
+      <div className="bg-white border border-gray-200 rounded-xl p-3.5 mb-5 flex flex-wrap gap-2.5 print:hidden">
         <div className="flex-1 min-w-[200px] relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
@@ -251,20 +476,20 @@ export function ApplicationsClient() {
 
       {/* Error */}
       {error && (
-        <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-lg p-3.5 mb-5">
+        <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-lg p-3.5 mb-5 print:hidden">
           <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-red-700">{error}</p>
         </div>
       )}
 
       {/* Table Card */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden print:border-none print:shadow-none">
         {loading ? (
-          <div className="p-12 text-center">
+          <div className="p-12 text-center print:hidden">
             <Loader2 className="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" />
             <p className="text-sm text-gray-500">Loading applications…</p>
           </div>
-        ) : applications.length === 0 ? (
+        ) : displayApplications.length === 0 ? (
           <div className="p-12 text-center">
             <FileText className="w-8 h-8 text-gray-300 mx-auto mb-3" />
             <p className="text-sm font-medium text-gray-900">No applications found</p>
@@ -288,16 +513,16 @@ export function ApplicationsClient() {
                   <th>Status</th>
                   <th>Decision By</th>
                   <th>Submitted</th>
-                  <th className="text-right">Actions</th>
+                  <th className="text-right print:hidden">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {applications.map((app) => (
+                {displayApplications.map((app) => (
                   <tr key={app.id}>
                     <td>
                       <Link
                         href={`/admin/applications/${app.id}`}
-                        className="font-mono text-xs font-medium text-gray-900 hover:underline"
+                        className="font-mono text-xs font-medium text-gray-900 hover:underline print:no-underline"
                       >
                         {app.referenceNumber}
                       </Link>
@@ -334,7 +559,7 @@ export function ApplicationsClient() {
                     <td className="text-xs text-gray-400 whitespace-nowrap">
                       {formatDateTime(app.submittedAt)}
                     </td>
-                    <td className="text-right">
+                    <td className="text-right print:hidden">
                       <div className="flex items-center justify-end gap-1">
                         <Link
                           href={`/admin/applications/${app.id}`}
@@ -372,7 +597,7 @@ export function ApplicationsClient() {
 
         {/* Pagination */}
         {pagination.totalPages > 1 && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100">
+          <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 print:hidden">
             <p className="text-xs text-gray-500">
               Showing {(pagination.page - 1) * pagination.pageSize + 1}–
               {Math.min(pagination.page * pagination.pageSize, pagination.total)} of{" "}

@@ -23,18 +23,18 @@ export default async function AdminLayout({
   return (
     <div className="flex min-h-screen bg-[#fafafa]">
       {/* Sidebar — desktop */}
-      <div className="hidden lg:flex flex-shrink-0">
+      <div className="hidden lg:flex flex-shrink-0 print:hidden">
         <AdminSidebar />
       </div>
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile header */}
-        <div className="lg:hidden flex items-center justify-between bg-[#111827] px-4 py-3">
+        <div className="lg:hidden flex items-center justify-between bg-[#111827] px-4 py-3 print:hidden">
           <p className="text-sm font-semibold text-white">VRD Exports — Admin</p>
         </div>
 
-        <main className="flex-1 overflow-auto p-6 md:p-8">{children}</main>
+        <main className="flex-1 overflow-auto p-6 md:p-8 print:p-0 print:overflow-visible print:bg-white">{children}</main>
       </div>
     </div>
   );
